@@ -1,45 +1,125 @@
-import { action, KeyDownEvent, SingletonAction, WillAppearEvent, DidReceiveSettingsEvent } from "@elgato/streamdeck";
+import { action, KeyDownEvent, SingletonAction, WillAppearEvent, DidReceiveSettingsEvent, WillDisappearEvent } from "@elgato/streamdeck";
 import { exec } from "child_process";
 import * as path from 'path';
 
 @action({ UUID: "com.lukas-horst.scriptrunner.run-script" })
 export class RunScript extends SingletonAction<RunScriptSettings> {
+
+    // This map stores the schedule ID for each coordinate
+    private scheduleMap = new Map<string, NodeJS.Timeout>();
+
+    /**
+     * Called when the action appears on the Stream Deck.
+     * It updates the image based on the file extension in the settings.
+     * @param ev The WillAppearEvent payload.
+     */
     override onWillAppear(ev: WillAppearEvent<RunScriptSettings>): void | Promise<void> {
-        this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action);
+        this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
     }
 
+    /**
+     * Called when the settings for the action are received or changed.
+     * It updates the image based on the file extension.
+     * @param ev The DidReceiveSettingsEvent payload.
+     */
     override onDidReceiveSettings(ev: DidReceiveSettingsEvent<RunScriptSettings>): Promise<void> | void {
-        this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action);
+        this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
+    }
+
+    /**
+     * Called when the action is removed from the Stream Deck.
+     * It cleans up any running schedules to prevent memory leaks.
+     * @param ev The WillDisappearEvent payload.
+     */
+    override onWillDisappear(ev: WillDisappearEvent<RunScriptSettings>): void | Promise<void> {
+        // Clean up all running schedules when an action disappears
+        this.scheduleMap.forEach(id => clearInterval(id));
+        this.scheduleMap.clear();
     }
 
     /**
      * Updates the action's image based on the file extension in the settings.
      * @param settings The settings object containing the file path.
      * @param action The action instance to update the image for.
+     * @param running True if the script is currently running
      */
-    private updateImageBasedOnFileExtension(settings: RunScriptSettings, action: { setImage: (image: string) => Promise<void> }): void {
+    private updateImageBasedOnFileExtension(settings: RunScriptSettings, action: any, running: boolean): void {
         const file = settings.file;
+        const scheduleInt = settings.schedule ? parseInt(settings.schedule, 10) : undefined;
         if (!file) {
             action.setImage("imgs/plugin/script-runner-logo.png");
             return;
         }
+        const runningString = running ? "run-" : "";
 
         if (file.endsWith(".py")) {
-            action.setImage("imgs/plugin/run-python.png");
+            if (scheduleInt) {
+                action.setImage(`imgs/plugin/${runningString}python-schedule.png`);
+            } else {
+                action.setImage(`imgs/plugin/${runningString}python-script.png`);
+            }
         } else if (file.endsWith(".ps1")) {
-            action.setImage("imgs/plugin/run-powershell.png");
+            if (scheduleInt) {
+                action.setImage(`imgs/plugin/${runningString}powershell-schedule.png`);
+            } else {
+                action.setImage(`imgs/plugin/${runningString}powershell-script.png`);
+            }
         } else {
             action.setImage("imgs/plugin/invalid.png");
         }
     }
 
+    /**
+     * Called when the user presses the key.
+     * It toggles the scheduled execution of the script or runs it once.
+     * @param ev The KeyDownEvent payload.
+     */
     override async onKeyDown(ev: KeyDownEvent<RunScriptSettings>): Promise<void> {
         const { settings } = ev.payload;
+        const coordinates = this.getCoordinates(ev);
+        const scheduleInt = settings.schedule ? parseInt(settings.schedule, 10) : undefined;
 
-        if (settings.file) {
-            // Pass the action instance and terminal setting to the executeScript function
-            this.executeScript(settings.file, settings.parameters, ev.action, settings.terminal);
+        const key = `${coordinates[0]},${coordinates[1]}`;
+
+        // If a schedule is already running for this button, stop it
+        if (this.scheduleMap.has(key)) {
+            this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
+            clearInterval(this.scheduleMap.get(key)!);
+            this.scheduleMap.delete(key);
+            return;
         }
+        this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, true);
+
+        // If a schedule is configured and is a valid number, start it
+        if (settings.file && scheduleInt !== undefined && !isNaN(scheduleInt) && scheduleInt > 0) {
+            // Execute the script immediately
+            this.executeScript(settings.file, settings.parameters, ev.action, settings.terminal);
+
+            // Then set an interval to run it repeatedly and store the ID
+            const newScheduleId = setInterval(() => {
+                // @ts-ignore
+                this.executeScript(settings.file, settings.parameters, ev.action, settings.terminal);
+            }, scheduleInt * 1000); // Schedule is in seconds, so multiply by 1000
+            this.scheduleMap.set(key, newScheduleId);
+        } else if (settings.file) {
+            // No valid schedule, run the script once
+            this.executeScript(settings.file, settings.parameters, ev.action, settings.terminal);
+            // Updating the image with a 1.5s delay
+            setTimeout(() => {
+                this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
+            }, 1500);
+        }
+    }
+
+    /**
+     * Gets the row and column coordinates from a Stream Deck event.
+     * @param event The Stream Deck event object.
+     * @returns A tuple containing the row and column coordinates: [row, column].
+     */
+    private getCoordinates(event: KeyDownEvent<RunScriptSettings>): [number, number] {
+        // @ts-ignore
+        const { row, column } = event.payload.coordinates;
+        return [row, column];
     }
 
     /**
@@ -53,21 +133,16 @@ export class RunScript extends SingletonAction<RunScriptSettings> {
         const command = this.getExecutionCommand(filePath, parameters, inTerminal);
 
         if (!command) {
-            console.error(`Unsupported file type for script: ${filePath}`);
-            action.setTitle("Invalid file");
             return;
         }
 
         exec(command, (error, stdout, stderr) => {
-            if (error) {
-                console.error(`Error executing script: ${error.message}`);
-                // Set the title to show the error
-                action.setTitle("Error: " + stderr.substring(0, 20) + "...");
-            } else {
-                console.log(`Script output: ${stdout}`);
-                // Set the title with the script's output
-                const output = stdout.trim();
-                action.setTitle(output || "Done!");
+            if (!error) {
+                // Update the title only if a schedule is not running to avoid race conditions
+                const key = `${action.coordinates.row},${action.coordinates.column}`;
+                if (!this.scheduleMap.has(key)) {
+                    const output = stdout.trim();
+                }
             }
         });
     }
@@ -81,6 +156,7 @@ export class RunScript extends SingletonAction<RunScriptSettings> {
      */
     private getExecutionCommand(filePath: string, parameters: string, inTerminal: boolean): string | null {
         let baseCommand: string | null = null;
+
         if (filePath.endsWith(".py")) {
             baseCommand = `python "${filePath}" ${parameters}`;
         } else if (filePath.endsWith(".ps1")) {
@@ -91,15 +167,28 @@ export class RunScript extends SingletonAction<RunScriptSettings> {
             return null;
         }
 
-        // If inTerminal is true, wrap the command to run it in a new terminal window
         if (inTerminal) {
-            // Get the directory of the file using the path module
             const fileDir = path.dirname(filePath);
-            // Use 'cd' to change to the correct directory before executing the command
             return `start cmd.exe /k "cd /d "${fileDir}" && ${baseCommand}"`;
         }
 
         return baseCommand;
+    }
+
+    /**
+     * Opens a new terminal window and prints a given string.
+     * @param message The string to be printed in the terminal.
+     */
+    private printToTerminal(message: string): void {
+        const command = `start cmd.exe /k "echo ${message}"`;
+
+        exec(command, (error, stdout, stderr) => {
+            if (error) {
+                console.error(`Error opening terminal: ${error.message}`);
+            } else {
+                console.log(`Terminal opened with message: ${message}`);
+            }
+        });
     }
 }
 
@@ -108,4 +197,7 @@ type RunScriptSettings = {
     file?: string;
     parameters?: string;
     terminal?: boolean;
+    schedule?: string;
+    trueImage?: string;
+    falseImage?: string;
 };
