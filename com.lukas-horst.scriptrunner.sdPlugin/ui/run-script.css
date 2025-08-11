@@ -1,0 +1,16 @@
+.sdpi-clear-button {
+    background-color: #383838;
+    border: 1px solid #5a5a5a;
+    color: #ffffff;
+    height: 32px;
+    width: 32px;
+}
+
+.sdpi-clear-button:hover {
+    background-color: #2a2a2a; /* Dunklere Hintergrundfarbe beim Hover */
+    cursor: pointer; /* Zeigt an, dass das Element klickbar ist */
+}
+
+#actionIdItem {
+    display: none;
+}

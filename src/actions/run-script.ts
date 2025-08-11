@@ -1,12 +1,16 @@
 import { action, KeyDownEvent, SingletonAction, WillAppearEvent, DidReceiveSettingsEvent, WillDisappearEvent } from "@elgato/streamdeck";
 import { exec } from "child_process";
 import * as path from 'path';
+import streamDeck, { LogLevel } from "@elgato/streamdeck";
+const logger = streamDeck.logger.createScope("run-script");
 
 @action({ UUID: "com.lukas-horst.scriptrunner.run-script" })
 export class RunScript extends SingletonAction<RunScriptSettings> {
 
     // This map stores the schedule ID for each coordinate
-    private scheduleMap = new Map<string, NodeJS.Timeout>();
+    private scheduleMap = new Map<string|undefined, NodeJS.Timeout>();
+    // This map stores the info if the autostart was activated for each coordinate
+    private autostartMap = new Map<string|undefined, boolean>();
 
     /**
      * Called when the action appears on the Stream Deck.
@@ -14,7 +18,19 @@ export class RunScript extends SingletonAction<RunScriptSettings> {
      * @param ev The WillAppearEvent payload.
      */
     override onWillAppear(ev: WillAppearEvent<RunScriptSettings>): void | Promise<void> {
-        this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
+        const { settings } = ev.payload;
+        const id = settings.actionId;
+        const autostart = settings.autostart;
+        if (autostart && !this.autostartMap.has(id)) {
+            this.autostartMap.set(id, true);
+            // @ts-ignore
+            const scheduleInt = parseInt(settings.schedule, 10);
+            this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, true);
+            this.startSchedule(settings, ev.action, id, scheduleInt);
+        } else {
+            this.autostartMap.set(id, false);
+            this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
+        }
     }
 
     /**
@@ -23,7 +39,14 @@ export class RunScript extends SingletonAction<RunScriptSettings> {
      * @param ev The DidReceiveSettingsEvent payload.
      */
     override onDidReceiveSettings(ev: DidReceiveSettingsEvent<RunScriptSettings>): Promise<void> | void {
-        this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
+        const { settings } = ev.payload;
+        const id = settings.actionId;
+        // Adding new added id's to the autostart
+        if (!this.autostartMap.has(id)) {
+            this.autostartMap.set(id, false);
+        }
+        this.stopSchedule(id, ev);
+        this.updateImageBasedOnFileExtension(settings, ev.action, false);
     }
 
     /**
@@ -76,31 +99,16 @@ export class RunScript extends SingletonAction<RunScriptSettings> {
      */
     override async onKeyDown(ev: KeyDownEvent<RunScriptSettings>): Promise<void> {
         const { settings } = ev.payload;
-        const coordinates = this.getCoordinates(ev);
         const scheduleInt = settings.schedule ? parseInt(settings.schedule, 10) : undefined;
 
-        const key = `${coordinates[0]},${coordinates[1]}`;
+        const id = settings.actionId;
 
-        // If a schedule is already running for this button, stop it
-        if (this.scheduleMap.has(key)) {
-            this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
-            clearInterval(this.scheduleMap.get(key)!);
-            this.scheduleMap.delete(key);
-            return;
-        }
+        if (this.stopSchedule(id, ev)) {return;}
         this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, true);
 
         // If a schedule is configured and is a valid number, start it
         if (settings.file && scheduleInt !== undefined && !isNaN(scheduleInt) && scheduleInt > 0) {
-            // Execute the script immediately
-            this.executeScript(settings.file, settings.parameters, ev.action, settings.terminal);
-
-            // Then set an interval to run it repeatedly and store the ID
-            const newScheduleId = setInterval(() => {
-                // @ts-ignore
-                this.executeScript(settings.file, settings.parameters, ev.action, settings.terminal);
-            }, scheduleInt * 1000); // Schedule is in seconds, so multiply by 1000
-            this.scheduleMap.set(key, newScheduleId);
+            this.startSchedule(settings, ev.action, id, scheduleInt);
         } else if (settings.file) {
             // No valid schedule, run the script once
             this.executeScript(settings.file, settings.parameters, ev.action, settings.terminal);
@@ -112,11 +120,49 @@ export class RunScript extends SingletonAction<RunScriptSettings> {
     }
 
     /**
+     * Executes a script immediately and then sets up a recurring schedule for its execution.
+     * The schedule is stored in the `scheduleMap` to be managed later (e.g., to be stopped).
+     * @param settings The settings object containing script file path, parameters, etc.
+     * @param action The action instance to be used for executing the script.
+     * @param id A unique id identifying the action's on the Stream Deck.
+     * @param scheduleInt The interval in seconds for the script to be re-executed.
+     */
+    private startSchedule(settings: RunScriptSettings, action: any, id: string|undefined, scheduleInt: number): void {
+        // Execute the script immediately
+        // @ts-ignore
+        this.executeScript(settings.file, settings.parameters, action, settings.terminal);
+
+        // Then set an interval to run it repeatedly and store the ID
+        const newScheduleId = setInterval(() => {
+            // @ts-ignore
+            this.executeScript(settings.file, settings.parameters, action, settings.terminal);
+        }, scheduleInt * 1000); // Schedule is in seconds, so multiply by 1000
+
+        this.scheduleMap.set(id, newScheduleId);
+    }
+
+    /**
+     * Stops a running scheduled script based on its unique identifier.
+     * It clears the interval, removes the entry from the schedule map, and updates the action's image.
+     * @param id The unique identifier for the schedule to be stopped.
+     * @param ev The Stream Deck event payload, used to access settings and action properties.
+     */
+    private stopSchedule(id: string | undefined, ev: KeyDownEvent<RunScriptSettings> | DidReceiveSettingsEvent<RunScriptSettings>): boolean {
+        if (this.scheduleMap.has(id)) {
+            this.updateImageBasedOnFileExtension(ev.payload.settings, ev.action, false);
+            clearInterval(this.scheduleMap.get(id)!);
+            this.scheduleMap.delete(id);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Gets the row and column coordinates from a Stream Deck event.
      * @param event The Stream Deck event object.
      * @returns A tuple containing the row and column coordinates: [row, column].
      */
-    private getCoordinates(event: KeyDownEvent<RunScriptSettings>): [number, number] {
+    private getCoordinates(event: KeyDownEvent<RunScriptSettings> | WillAppearEvent<RunScriptSettings>): [number, number] {
         // @ts-ignore
         const { row, column } = event.payload.coordinates;
         return [row, column];
@@ -198,6 +244,9 @@ type RunScriptSettings = {
     parameters?: string;
     terminal?: boolean;
     schedule?: string;
+    autostart?: boolean;
     trueImage?: string;
     falseImage?: string;
+    separateScript?: boolean;
+    actionId?: string;
 };
