@@ -1,22 +1,6 @@
 setTimeout(() => {
     setId();
 
-    separateScriptCheck();
-    let separateScriptCheckbox = document.getElementById('separateScriptCheckbox');
-    separateScriptCheckbox.addEventListener('input', () => {
-        setTimeout(() => {
-            separateScriptCheck();
-        }, 10);
-    });
-
-    scriptCheck()
-    let file = document.getElementById('file');
-    file.addEventListener('input', () => {
-        setTimeout(() => {
-            scriptCheck();
-        }, 10);
-    });
-
     scheduleCheck();
     let schedule = document.getElementById('schedule');
     schedule.addEventListener('input', () => {
@@ -37,6 +21,30 @@ setTimeout(() => {
     falseImage.addEventListener('input', () => {
         setTimeout(() => {
             imagesCheck();
+        }, 10);
+    });
+
+    separateScheduleCheck();
+    let separateScheduleCheckbox = document.getElementById('separateScheduleCheckbox');
+    separateScheduleCheckbox.addEventListener('input', () => {
+        setTimeout(() => {
+            separateScheduleCheck();
+        }, 10);
+    })
+
+    scriptCheck()
+    let file = document.getElementById('file');
+    file.addEventListener('input', () => {
+        setTimeout(() => {
+            scriptCheck();
+        }, 10);
+    });
+
+    separateScriptCheck();
+    let separateScriptCheckbox = document.getElementById('separateScriptCheckbox');
+    separateScriptCheckbox.addEventListener('input', () => {
+        setTimeout(() => {
+            separateScriptCheck();
         }, 10);
     });
 }, 10);
@@ -62,6 +70,14 @@ function scriptCheck() {
     let parameters = document.getElementById('parameters');
     let actionId = document.getElementById('actionId');
     let autostartCheckbox = document.getElementById('autostartCheckbox');
+    let countdownCheckbox = document.getElementById('countdownCheckbox');
+    let separateFileItem = document.getElementById('separateFileItem');
+    let separateFile = document.getElementById('separateFile');
+    let separateParametersItem = document.getElementById('separateParametersItem');
+    let separateParameters = document.getElementById('separateParameters');
+    let separateScheduleCheckbox = document.getElementById('separateScheduleCheckbox');
+    let separateScheduleItem = document.getElementById('separateScheduleItem');
+    let separateSchedule = document.getElementById('separateSchedule');
 
     let fileValue = file.value;
     if (fileValue) {
@@ -94,11 +110,21 @@ function scriptCheck() {
     actionId.value = '';
     autostartCheckbox.style.display = 'none';
     autostartCheckbox.value = false;
+    countdownCheckbox.style.display = 'none';
+    countdownCheckbox.value = false;
+    separateFileItem.style.display = 'none';
+    separateFile.value = '';
+    separateParametersItem.style.display = 'none';
+    separateParameters.value = '';
+    separateScheduleCheckbox.value = false;
+    separateScheduleItem.style.display = 'none';
+    separateSchedule.value = '';
 }
 
 function scheduleCheck() {
     let schedule = document.getElementById('schedule');
     let autostartCheckbox = document.getElementById('autostartCheckbox');
+    let countdownCheckbox = document.getElementById('countdownCheckbox');
 
     let scheduleValue = schedule.value;
     // Convert the value to a number
@@ -106,9 +132,12 @@ function scheduleCheck() {
     // Check if the value is a number AND if it's greater than 0
     if (!isNaN(scheduleNumber) && scheduleNumber > 0) {
         autostartCheckbox.style.display = 'block';
+        countdownCheckbox.style.display = 'block';
     } else {
         autostartCheckbox.style.display = 'none';
         autostartCheckbox.value = false;
+        countdownCheckbox.style.display = 'none';
+        countdownCheckbox.value = false;
     }
 }
 
@@ -130,15 +159,42 @@ function imagesCheck() {
 
 function separateScriptCheck() {
     let separateScriptCheckbox = document.getElementById('separateScriptCheckbox');
-    let scheduleItem = document.getElementById('scheduleItem');
-    let schedule = document.getElementById('schedule');
+
+    let separateFileItem = document.getElementById('separateFileItem');
+    let separateFile = document.getElementById('separateFile');
+    let separateParametersItem = document.getElementById('separateParametersItem');
+    let separateParameters = document.getElementById('separateParameters');
+    let separateScheduleCheckbox = document.getElementById('separateScheduleCheckbox');
 
     let separateScriptCheckboxValue = separateScriptCheckbox.value;
     if (separateScriptCheckboxValue) {
+        separateFileItem.style.display = 'block';
+        separateParametersItem.style.display = 'block';
+    } else {
+        separateFileItem.style.display = 'none';
+        separateFile.value = '';
+        separateParametersItem.style.display = 'none';
+        separateParameters.value = '';
+        separateScheduleCheckbox.value = false;
+    }
+}
+
+function separateScheduleCheck() {
+    let scheduleItem = document.getElementById('scheduleItem');
+    let schedule = document.getElementById('schedule');
+    let separateScheduleCheckbox = document.getElementById('separateScheduleCheckbox');
+    let separateScheduleItem = document.getElementById('separateScheduleItem');
+    let separateSchedule = document.getElementById('separateSchedule');
+
+    if (separateScheduleCheckbox.value) {
+        schedule.value = '';
+        scheduleCheck();
         scheduleItem.style.display = 'none';
-        schedule.value = "";
+        separateScheduleItem.style.display = 'block';
     } else {
         scheduleItem.style.display = 'block';
+        separateScheduleItem.style.display = 'none';
+        separateSchedule.value = '';
     }
 }
 
